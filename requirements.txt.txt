@@ -1,6 +1,6 @@
 streamlit
 python-docx
-pandas
-pillow
-requests
 PyMuPDF
+Pillow
+requests
+
