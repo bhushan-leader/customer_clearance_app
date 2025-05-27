@@ -3,3 +3,4 @@ python-docx
 pandas
 pillow
 requests
+PyMuPDF
