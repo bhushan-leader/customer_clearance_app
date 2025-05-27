@@ -1,11 +1,9 @@
 import streamlit as st
-import pdfplumber
 import docx
 import pandas as pd
 from PIL import Image
 import requests
 import tempfile
-import cv2
 import os
 
 # Setup folders
