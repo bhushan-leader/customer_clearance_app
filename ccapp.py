@@ -1,185 +1,92 @@
 import streamlit as st
-from docx import Document
-import pandas as pd
-from PIL import Image
-import requests
-import tempfile
+import fitz  # PyMuPDF
 import os
-import cv2  # For camera capture
-import fitz  # PyMuPDF for PDF text extraction
+import requests
+from PIL import Image
+from docx import Document
+from datetime import datetime
 
-# Setup folders
-os.makedirs("saved_documents/uploaded_files", exist_ok=True)
-os.makedirs("saved_documents/extracted_text", exist_ok=True)
-
-# OCR API Key
+# API key for OCR.space
 OCR_API_KEY = "K83406522288957"
 
-# Streamlit config
-st.set_page_config(page_title="Customer Clearance App", layout="wide")
+# Create folders
+os.makedirs("extracted_docs", exist_ok=True)
+os.makedirs("extracted_texts", exist_ok=True)
 
-# --- Helper Functions ---
+# Function to call OCR.space for image text extraction
+def extract_text_from_image_api(image_file):
+    url = "https://api.ocr.space/parse/image"
+    files = {"file": image_file}
+    data = {"apikey": OCR_API_KEY, "language": "eng", "isOverlayRequired": False}
 
-def save_file(file):
-    """Save uploaded file locally and return path"""
-    path = os.path.join("saved_documents/uploaded_files", file.name)
-    with open(path, "wb") as f:
-        f.write(file.read())
-    return path
+    response = requests.post(url, files=files, data=data)
+    result = response.json()
 
-def extract_text_via_ocr(image_path):
-    """Extract text from image using OCR.space API"""
-    with open(image_path, 'rb') as img:
-        response = requests.post(
-            "https://api.ocr.space/parse/image",
-            files={"filename": img},
-            data={"apikey": OCR_API_KEY, "language": "eng"},
-        )
-    result_json = response.json()
-    try:
-        return result_json["ParsedResults"][0]["ParsedText"].strip()
-    except (KeyError, IndexError, TypeError):
-        return "❌ OCR failed to extract text."
+    if result.get("IsErroredOnProcessing"):
+        return "❌ OCR failed: " + result.get("ErrorMessage", ["Unknown error"])[0]
 
-def extract_text(file_path, ext):
-    """Extract text based on file extension"""
+    return result["ParsedResults"][0]["ParsedText"]
+
+# General extraction function
+def extract_text(file):
     text = ""
-    try:
-        if ext == "pdf":
-            # Use PyMuPDF for PDF text extraction (better than OCR fallback)
-            pdf = fitz.open(file_path)
-            for page in pdf:
-                text += page.get_text()
-            text = text.strip()
+    file_type = file.name.lower()
 
-        elif ext == "docx":
-            doc = Document(file_path)
-            text = "\n".join([para.text for para in doc.paragraphs]).strip()
+    if file_type.endswith(".docx"):
+        doc = Document(file)
+        text = "\n".join([para.text for para in doc.paragraphs])
 
-        elif ext == "csv":
-            df = pd.read_csv(file_path)
-            text = df.to_string()
+    elif file_type.endswith(".pdf"):
+        pdf = fitz.open(stream=file.read(), filetype="pdf")
+        for page in pdf:
+            text += page.get_text()
 
-        elif ext == "txt":
-            with open(file_path, "r", encoding="utf-8") as f:
-                text = f.read().strip()
+    elif file_type.endswith((".png", ".jpg", ".jpeg")):
+        text = extract_text_from_image_api(file)
 
-        elif ext in ["jpg", "jpeg", "png"]:
-            text = extract_text_via_ocr(file_path)
+    return text.strip()
 
-        else:
-            text = "Unsupported file type for text extraction."
+# Save function
+def save_file_and_text(file, text, source="upload"):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    except Exception as e:
-        text = f"❌ Error extracting text: {str(e)}"
-    return text
+    if source == "camera":
+        base_name = "camera"
+        file_path = os.path.join("extracted_docs", f"{timestamp}_{base_name}.jpg")
+        text_path = os.path.join("extracted_texts", f"{timestamp}_{base_name}.txt")
+        with open(file_path, "wb") as f:
+            f.write(file.getbuffer())
+    else:
+        base_name = os.path.splitext(file.name)[0]
+        file_path = os.path.join("extracted_docs", f"{timestamp}_{file.name}")
+        file.seek(0)
+        with open(file_path, "wb") as f:
+            f.write(file.read())
+        text_path = os.path.join("extracted_texts", f"{timestamp}_{base_name}.txt")
 
-def save_text(text, filename):
-    """Save extracted text to a .txt file and return path"""
-    path = os.path.join("saved_documents/extracted_text", filename + ".txt")
-    with open(path, "w", encoding="utf-8") as f:
+    with open(text_path, "w", encoding="utf-8") as f:
         f.write(text)
-    return path
+    st.success(f"✅ {source.capitalize()} file and extracted text saved!")
 
-# --- UI & Logic ---
+# Streamlit UI
+st.set_page_config(page_title="Document Extractor", layout="centered")
+st.title("📄 Document Text Extractor & Saver")
 
-# Header with style
-st.markdown("""
-    <style>
-        .main-title {
-            text-align: center;
-            color: navy;
-            font-size: 36px;
-            font-weight: bold;
-        }
-        .subtitle {
-            text-align: center;
-            color: gray;
-            font-size: 18px;
-            margin-bottom: 20px;
-        }
-        .section {
-            background-color: #f1f3f6;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 2px 2px 8px rgba(0,0,0,0.1);
-            margin-bottom: 30px;
-        }
-    </style>
-    <div class="main-title">📑 Customer Clearance System</div>
-    <div class="subtitle">Upload Files or Use Camera to Extract and Save Text Locally</div>
-""", unsafe_allow_html=True)
+# Upload Section
+uploaded_file = st.file_uploader("📂 Upload Word, PDF, or Image", type=["docx", "pdf", "png", "jpg", "jpeg"])
+if uploaded_file:
+    extracted = extract_text(uploaded_file)
+    st.text_area("📋 Extracted Text", extracted, height=300)
+    if st.button("💾 Save Uploaded File and Text"):
+        save_file_and_text(uploaded_file, extracted, source="upload")
 
-# Upload section
-with st.container():
-    st.markdown("### 📂 Upload a File")
-    st.markdown('<div class="section">', unsafe_allow_html=True)
-
-    uploaded_file = st.file_uploader("Choose a file (PDF, DOCX, CSV, TXT, JPG, PNG)",
-                                     type=["pdf", "docx", "csv", "txt", "jpg", "jpeg", "png"])
-    if uploaded_file:
-        file_size = round(len(uploaded_file.read()) / (1024 * 1024), 2)
-        uploaded_file.seek(0)  # Reset pointer after reading size
-        ext = uploaded_file.name.split('.')[-1].lower()
-        file_type = uploaded_file.type
-
-        st.success("✅ File uploaded successfully!")
-        st.markdown(f"**📄 File Name:** `{uploaded_file.name}`")
-        st.markdown(f"**💾 File Size:** `{file_size} MB`")
-        st.markdown(f"**📁 File Type:** `{file_type}`")
-
-        doc_type = st.selectbox("📌 Select Document Type", [
-            "Commercial Invoice",
-            "Bill of Lading",
-            "Packing List",
-            "Certificate of Origin",
-            "Other"
-        ])
-
-        file_path = save_file(uploaded_file)
-        text = extract_text(file_path, ext)
-        text_path = save_text(text, uploaded_file.name.split('.')[0])
-
-        metadata_path = os.path.join("saved_documents/extracted_text", uploaded_file.name.split('.')[0] + "_meta.txt")
-        with open(metadata_path, "w", encoding="utf-8") as meta:
-            meta.write(f"File Name: {uploaded_file.name}\n")
-            meta.write(f"File Size: {file_size} MB\n")
-            meta.write(f"File Type: {file_type}\n")
-            meta.write(f"Document Type: {doc_type}\n")
-
-        st.text_area("📝 Extracted Text", text, height=300)
-        st.info(f"💾 Text saved at: `{text_path}`")
-        st.success(f"📌 Document Type: {doc_type}")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# Camera capture section
-with st.container():
-    st.markdown("### 📸 Capture from Camera")
-    st.markdown('<div class="section">', unsafe_allow_html=True)
-
-    if st.button("📷 Take Photo and Extract Text"):
-        st.info("Activating webcam...")
-        camera = cv2.VideoCapture(0)
-        if not camera.isOpened():
-            st.error("❌ Camera not available or permission denied.")
-        else:
-            ret, frame = camera.read()
-            camera.release()
-            if ret:
-                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-                cv2.imwrite(temp_file.name, frame)
-                st.image(temp_file.name, caption="📷 Captured Image", use_container_width=True)
-
-                extracted_text = extract_text_via_ocr(temp_file.name)
-                text_path = save_text(extracted_text, "camera_capture")
-                st.text_area("📝 Extracted Text from Camera", extracted_text, height=300)
-                st.success(f"💾 Text saved at: `{text_path}`")
-            else:
-                st.error("❌ Failed to capture image.")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# Footer
+# Camera Section
 st.markdown("---")
-st.markdown("<h6 style='text-align: center; color: gray;'>🔐 Your files and extracted data are securely saved locally.</h6>", unsafe_allow_html=True)
+st.header("📷 Capture Document via Camera")
+camera_photo = st.camera_input("Take a photo")
+
+if camera_photo:
+    extracted_text = extract_text_from_image_api(camera_photo)
+    st.text_area("📋 Extracted Text from Camera", extracted_text, height=300)
+    if st.button("💾 Save Camera Image and Text"):
+        save_file_and_text(camera_photo, extracted_text, source="camera")
