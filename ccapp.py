@@ -5,6 +5,9 @@ import requests
 from PIL import Image
 from docx import Document
 from datetime import datetime
+from io import BytesIO
+import base64
+import textwrap
 
 # API key for OCR.space
 OCR_API_KEY = "K83406522288957"
@@ -68,17 +71,55 @@ def save_file_and_text(file, text, source="upload"):
         f.write(text)
     st.success(f"✅ {source.capitalize()} file and extracted text saved!")
 
-# Streamlit UI
-st.set_page_config(page_title="Document Extractor", layout="centered")
-st.title("📄 Document Text Extractor & Saver")
+# Summary function
+def summarize_text(text, max_lines=3):
+    lines = text.strip().split('\n')
+    return "\n".join(lines[:max_lines]) + ("\n..." if len(lines) > max_lines else "")
+
+# Download link function
+def get_download_link(text, filename="extracted_text.txt"):
+    b64 = base64.b64encode(text.encode()).decode()
+    return f'<a href="data:file/txt;base64,{b64}" download="{filename}">📥 Download Extracted Text</a>'
+
+# UI setup
+st.set_page_config(page_title="📄 Smart Document Extractor", layout="centered", page_icon="📄")
+
+st.markdown("""
+    <style>
+        .main { background-color: #f8f9fa; }
+        .stTextArea textarea { font-family: monospace; font-size: 0.9rem; }
+        .stButton button { background-color: #4CAF50; color: white; font-weight: bold; }
+        .stHeader, h1, h2, h3 { color: #2c3e50; }
+        .reportview-container .main footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📄 Smart Document Text Extractor & Saver")
+
+# Sidebar stats
+st.sidebar.header("📊 Text Info")
+word_count = 0
+char_count = 0
 
 # Upload Section
 uploaded_file = st.file_uploader("📂 Upload Word, PDF, or Image", type=["docx", "pdf", "png", "jpg", "jpeg"])
 if uploaded_file:
     extracted = extract_text(uploaded_file)
-    st.text_area("📋 Extracted Text", extracted, height=300)
+    word_count = len(extracted.split())
+    char_count = len(extracted)
+
+    st.subheader("📋 Extracted Text")
+    st.text_area("", extracted, height=300)
+
+    st.markdown(get_download_link(extracted), unsafe_allow_html=True)
+
     if st.button("💾 Save Uploaded File and Text"):
         save_file_and_text(uploaded_file, extracted, source="upload")
+
+    st.sidebar.write(f"📝 **Words:** {word_count}")
+    st.sidebar.write(f"🔠 **Characters:** {char_count}")
+    st.sidebar.markdown("🧠 **Summary:**")
+    st.sidebar.info(summarize_text(extracted))
 
 # Camera Section
 st.markdown("---")
@@ -87,6 +128,18 @@ camera_photo = st.camera_input("Take a photo")
 
 if camera_photo:
     extracted_text = extract_text_from_image_api(camera_photo)
-    st.text_area("📋 Extracted Text from Camera", extracted_text, height=300)
+    word_count = len(extracted_text.split())
+    char_count = len(extracted_text)
+
+    st.subheader("📋 Extracted Text from Camera")
+    st.text_area("", extracted_text, height=300)
+
+    st.markdown(get_download_link(extracted_text, "camera_text.txt"), unsafe_allow_html=True)
+
     if st.button("💾 Save Camera Image and Text"):
         save_file_and_text(camera_photo, extracted_text, source="camera")
+
+    st.sidebar.write(f"📷 **Camera Words:** {word_count}")
+    st.sidebar.write(f"🔠 **Camera Characters:** {char_count}")
+    st.sidebar.markdown("🧠 **Camera Summary:**")
+    st.sidebar.info(summarize_text(extracted_text))
